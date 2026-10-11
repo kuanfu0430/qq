@@ -27,25 +27,57 @@ def log(msg: str, quiet: bool) -> None:
 
 
 def lock_path() -> str:
-    return os.path.join(q.cache_dir(), "updatedb.lock")
+    return os.path.join(q.cache_dir(), "updatedb.pid")
+
+
+def pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if q.IS_WIN:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        k32.GetExitCodeProcess(h, ctypes.byref(code))
+        k32.CloseHandle(h)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def acquire_lock() -> bool:
+    """PID 鎖：記錄的程序已不在（被中斷、重開機）就自動接手。"""
     os.makedirs(q.cache_dir(), exist_ok=True)
-    path = lock_path()
-    try:
-        os.mkdir(path)
-        return True
-    except FileExistsError:
-        # 超過 3 小時視為殘留
+    old_dir = os.path.join(q.cache_dir(), "updatedb.lock")  # 舊版留下的目錄鎖
+    if os.path.isdir(old_dir):
         try:
-            if time.time() - os.stat(path).st_mtime > 3 * 3600:
-                os.rmdir(path)
-                os.mkdir(path)
-                return True
+            os.rmdir(old_dir)
         except OSError:
             pass
-        return False
+    path = lock_path()
+    try:
+        with open(path) as fh:
+            if pid_alive(int(fh.read().strip() or 0)):
+                return False
+    except (OSError, ValueError):
+        pass
+    with open(path, "w") as fh:
+        fh.write(str(os.getpid()))
+    return True
+
+
+def release_lock() -> None:
+    try:
+        os.remove(lock_path())
+    except OSError:
+        pass
 
 
 def build_mac(quiet: bool) -> int:
@@ -91,10 +123,7 @@ def main(argv: list[str]) -> int:
             log(f"共 {n} 筆 → {path}", quiet)
             rc = 0
     finally:
-        try:
-            os.rmdir(lock_path())
-        except OSError:
-            pass
+        release_lock()
     log(f"完成 {time.strftime('%F %T')}，耗時 {int(time.time() - start)} 秒", quiet)
     return rc
 
