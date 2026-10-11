@@ -207,6 +207,14 @@ else
     fi
 fi
 if [ "$NEED_BUILD" = 1 ]; then
+    for f in "$CACHE/index.gz" "$CACHE/locate.database"; do
+        if [ -f "$f" ] && [ -n "$(find "$f" -mmin -1440 2>/dev/null)" ]; then
+            NEED_BUILD=0
+            say "現有索引未滿一天，這次不重建"
+        fi
+    done
+fi
+if [ "$NEED_BUILD" = 1 ]; then
     nohup "$PY" "$QQ_DIR/bin/qq-updatedb" > "$CACHE/updatedb.log" 2>&1 &
     say "首次建索引已在背景執行（約 1～5 分鐘，紀錄 $CACHE/updatedb.log）；期間可先用 --fresh"
 fi

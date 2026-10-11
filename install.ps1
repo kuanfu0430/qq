@@ -133,8 +133,13 @@ $action  = New-ScheduledTaskAction -Execute $pyw -Argument ("`"" + (Join-Path $Q
 $trigger = New-ScheduledTaskTrigger -Daily -At '12:30'
 $set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 Register-ScheduledTask -TaskName $Task -Action $action -Trigger $trigger -Settings $set -Description 'qq 指令集：每天重建檔名索引' -Force | Out-Null
-Start-ScheduledTask -TaskName $Task
-Say "排程：工作排程器「$Task」每天 12:30；首次建索引已在背景執行（約 3～10 分鐘），期間可先用 --fresh"
+$idx = Join-Path $Cache 'index.gz'
+if ((Test-Path $idx) -and ((Get-Date) - (Get-Item $idx).LastWriteTime).TotalHours -lt 24) {
+    Say "排程：工作排程器「$Task」每天 12:30（現有索引未滿一天，這次不重建）"
+} else {
+    Start-ScheduledTask -TaskName $Task
+    Say "排程：工作排程器「$Task」每天 12:30；首次建索引已在背景執行（約 5～15 分鐘），期間可先用 --fresh"
+}
 
 if (-not (Get-Command rg -ErrorAction SilentlyContinue)) { Warn '選用：winget install BurntSushi.ripgrep.MSVC 可加快 qq grep' }
 if (-not (Get-Command fd -ErrorAction SilentlyContinue)) { Warn '選用：winget install sharkdp.fd 可加快 --fresh' }

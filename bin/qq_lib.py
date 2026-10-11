@@ -181,38 +181,38 @@ INDEX_HEADER = "#qq-index v1"
 
 
 def search_own_index(query: str) -> list[str]:
-    """分塊解壓＋正規表示式找「分隔符號＋名稱＋換行」，比逐行 Python 迴圈快很多。"""
+    """分塊解壓，直接在位元組上用正規表示式找「分隔符號＋名稱＋換行」，只解碼命中的那幾行。
+    （ASCII 字母不分大小寫；中日韓文字本來就沒有大小寫。）"""
     import re
     if not os.path.isfile(OWN_INDEX):
         raise QQError(
             f"還沒有索引（{OWN_INDEX}）。執行 qq-updatedb 建立（約數分鐘），或先用 --fresh 即時掃描"
         )
-    seps = r"[\\/]" if IS_WIN else "/"
-    rx = re.compile(seps + re.escape(query) + r"(?=\n)", re.IGNORECASE)
+    q = query.encode("utf-8", FS_ERRORS)
+    seps = rb"[\\/]" if IS_WIN else rb"/"
+    rx = re.compile(seps + re.escape(q) + rb"(?=\n)", re.IGNORECASE)
     out: list[str] = []
-    rest = ""
+    rest = b""
     first = True
     try:
         with gzip.open(OWN_INDEX, "rb") as fh:
             while True:
-                chunk = fh.read(8 * 1024 * 1024)
-                if not chunk and not rest:
+                chunk = fh.read(16 * 1024 * 1024)
+                buf = rest + chunk
+                if not buf:
                     break
-                text = rest + chunk.decode("utf-8", FS_ERRORS)
                 if chunk:
-                    cut = text.rfind("\n") + 1
-                    text, rest = text[:cut], text[cut:]
-                else:
-                    rest = ""
-                    if not text.endswith("\n"):
-                        text += "\n"
+                    cut = buf.rfind(b"\n") + 1
+                    buf, rest = buf[:cut], buf[cut:]
+                elif not buf.endswith(b"\n"):
+                    buf += b"\n"
                 if first:
-                    if not text.startswith(INDEX_HEADER):
+                    if not buf.startswith(INDEX_HEADER.encode()):
                         raise QQError(f"索引格式不符：{OWN_INDEX}（重跑 qq-updatedb）")
                     first = False
-                for m in rx.finditer(text):
-                    ls = text.rfind("\n", 0, m.start()) + 1
-                    out.append(text[ls:m.end()])
+                for m in rx.finditer(buf):
+                    ls = buf.rfind(b"\n", 0, m.start()) + 1
+                    out.append(buf[ls:m.end()].decode("utf-8", FS_ERRORS))
                     if len(out) >= MAX_RESULTS:
                         return out
                 if not chunk:
@@ -286,6 +286,13 @@ def walk_paths(roots: list[str]):
 def build_own_index(roots: list[str] | None = None) -> tuple[int, str]:
     roots = roots or default_index_roots()
     os.makedirs(cache_dir(), exist_ok=True)
+    # 清掉上次被中斷留下的暫存檔
+    for name in os.listdir(cache_dir()):
+        if name.startswith(os.path.basename(OWN_INDEX) + ".tmp"):
+            try:
+                os.remove(os.path.join(cache_dir(), name))
+            except OSError:
+                pass
     tmp = OWN_INDEX + f".tmp{os.getpid()}"
     n = 0
     try:
