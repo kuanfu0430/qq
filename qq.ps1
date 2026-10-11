@@ -56,7 +56,7 @@ function global:qq {
             $r = Invoke-QQBin "qq-$sub" $rest
             if ($r.Code -ne 0 -or -not $r.Target) { $global:LASTEXITCODE = [Math]::Max(1, $r.Code); return }
             $dest = $r.Target
-            if (-not (Test-Path -LiteralPath $dest -PathType Container)) { $dest = Split-Path -LiteralPath $dest -Parent }
+            if (-not (Test-Path -LiteralPath $dest -PathType Container)) { $dest = [IO.Path]::GetDirectoryName($dest) }
             Set-Location -LiteralPath $dest
             [Console]::Error.WriteLine("→ $($r.Target)")
             $global:LASTEXITCODE = 0
