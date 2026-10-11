@@ -1,0 +1,84 @@
+#!/bin/bash
+# PATH 後備入口（~/.local/bin/qq 是指向本檔的 symlink）。
+# 互動 zsh／bash 若已 source ~/qq/qq.sh，函式會蓋過本檔，find/grep 才能替目前 shell cd。
+# 本檔給舊終端／非互動環境用，避免「無此指令」。
+if [ -z "${QQ_HOME:-}" ]; then
+    # 本檔可能經 symlink 呼叫，先解析出真實位置（bin/ 的上一層就是 QQ_HOME）
+    self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    QQ_HOME="$(cd "$(dirname "$self")/.." && pwd)"
+    [ -d "$QQ_HOME/bin" ] || QQ_HOME="$HOME/qq"
+fi
+BIN="$QQ_HOME/bin"
+
+if [ ! -d "$BIN" ]; then
+    printf 'qq: 找不到 %s\n' "$BIN" >&2
+    exit 1
+fi
+
+run_bin() {
+    command "${QQ_PYTHON:-python3}" "$BIN/$1" "${@:2}"
+}
+
+wants_help() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --) return 1 ;;
+            -h|--help) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+qq_help() {
+    cat <<'EOF'
+qq 指令集
+
+用法：
+  qq <子指令> [參數...]
+
+子指令：
+  find    依名稱搜尋資料夾／檔案，互動選擇後切換目錄
+  pick    依名稱搜尋，選完把完整路徑印出來（人留在原地）
+  grep    依檔案內容搜尋，互動選擇後切換到該檔所在資料夾
+  help    顯示本說明
+
+這是 PATH 上的獨立指令，無法改變呼叫端目錄。
+要讓 qq find / qq grep 自動 cd，請開新終端機（或 source ~/.zshrc / ~/.bashrc）
+EOF
+}
+
+sub="${1:-}"
+case "$sub" in
+    find|grep)
+        shift
+        if wants_help "$@"; then
+            run_bin "qq-$sub" --help
+            exit $?
+        fi
+        target="$(run_bin "qq-$sub" "$@")"
+        rc=$?
+        [ "$rc" -ne 0 ] && exit "$rc"
+        [ -z "${target:-}" ] && exit 1
+        printf '→ %s\n' "$target" >&2
+        if [ -t 1 ]; then
+            dest="$target"
+            [ -d "$target" ] || dest="$(dirname -- "$target")"
+            printf '未自動 cd（獨立指令限制）。請執行：  cd %q\n' "$dest" >&2
+            printf '或開新終端機，之後的 qq find 就會自動切換目錄。\n' >&2
+        fi
+        printf '%s\n' "$target"
+        ;;
+    pick)
+        shift
+        run_bin qq-pick "$@"
+        ;;
+    ""|help|-h|--help)
+        qq_help
+        ;;
+    *)
+        printf 'qq: 未知的子指令「%s」\n\n' "$sub" >&2
+        qq_help >&2
+        exit 2
+        ;;
+esac

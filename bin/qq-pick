@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""qq pick - 依名稱搜尋，互動選擇後把完整路徑印到 stdout（不切換目錄）。"""
+
+from __future__ import annotations
+
+import locale
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from qq_lib import run_name_command
+
+HELP = """\
+qq pick - 依名稱搜尋，選完把完整路徑印出來（人留在原地）
+
+用法：
+  qq pick [選項] <名稱>
+
+選項：
+  -d, --dir     只搜尋資料夾
+  -f, --file    只搜尋檔案
+      --fresh   即時掃描硬碟（不使用索引資料庫）
+  -h, --help    顯示本說明
+
+說明：
+  * 搜尋規則與 qq find 完全相同（名稱完全相符、不分大小寫）。
+  * 差別：選完不切換目錄，只把完整路徑印到 stdout。
+  * 適合交給其他指令使用，例如：
+      vim "$(qq pick -f hosts)"
+      cp "$(qq pick -f notes.md)" ./
+      ls "$(qq pick -d mnt)"
+  * 取消或找不到時回傳非 0，不會印出路徑。
+  * 一律顯示選單（即使只有一筆結果）。無互動終端機時直接選取第一筆。
+"""
+
+
+def main(argv: list[str]) -> int:
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
+    return run_name_command("pick", argv, HELP)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

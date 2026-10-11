@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""qq grep - 依檔案內容搜尋，互動選擇後輸出完整路徑（由 qq.sh 負責 cd）。"""
+
+from __future__ import annotations
+
+import locale
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from qq_lib import QQError, choose_path, collect_grep, emit, hint_cd, parse_grep_args, search_content
+
+HELP = """\
+qq grep - 依檔案內容搜尋，選完切換到該檔所在資料夾
+
+用法：
+  qq grep [選項] <文字> [目錄]
+
+選項：
+      --regex   把 <文字> 當成正規表示式（預設當普通文字，不分大小寫）
+  -h, --help    顯示本說明
+
+說明：
+  * 不記得檔名、只記得裡面寫了什麼時使用。
+  * 沒指定目錄時，從「你現在所在的資料夾」往下搜。
+  * 每個檔只列一次（即使裡面有多處相符）；選單會顯示該檔第一處相符的內容。
+  * 選到檔案後，切換到它所在的資料夾。
+  * 人要留在原地、只拿完整路徑時，請直接呼叫實作檔（不要經過 qq 函式）：
+      vim "$(python3 ~/qq/bin/qq-grep TODO)"
+  * 取消或找不到時回傳非 0。
+  * 一律顯示選單（即使只有一筆結果）。無互動終端機時直接選取第一筆。
+"""
+
+
+def main(argv: list[str]) -> int:
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
+    try:
+        opts = parse_grep_args(argv)
+    except QQError as exc:
+        print(f"qq grep: {exc}", file=sys.stderr)
+        return 2
+
+    if opts.help:
+        print(HELP, end="")
+        return 0
+
+    assert opts.pattern is not None and opts.root is not None
+    try:
+        hits = search_content(opts.pattern, opts.root, opts.regex)
+    except QQError as exc:
+        print(f"qq grep: {exc}", file=sys.stderr)
+        return 3
+
+    items, snippets = collect_grep(hits)
+    if not items:
+        where = opts.root
+        print(f"qq grep: 在「{where}」找不到含有「{opts.pattern}」的檔案", file=sys.stderr)
+        return 1
+
+    title = f"qq grep  「{opts.pattern}」  共 {len(items)} 筆  （{opts.root}）"
+    if opts.regex:
+        title += "  [--regex]"
+
+    try:
+        chosen = choose_path(
+            items,
+            cmd="qq grep",
+            title=title,
+            enter_hint=hint_cd,
+            snippets=snippets,
+        )
+    except QQError as exc:
+        print(f"qq grep: {exc}", file=sys.stderr)
+        return 3
+
+    if chosen is None:
+        return 1
+    emit(chosen)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

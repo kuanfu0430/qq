@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""qq-updatedb - 重建 qq find / qq pick 用的名稱索引。
+
+  macOS  ：用系統的 /usr/libexec/locate.updatedb，以使用者身分建到 ~/.cache/qq/locate.database
+  Linux  ：有 plocate 就不需要（系統自己會更新）；沒有就建 qq 自建索引 ~/.cache/qq/index.gz
+  Windows：建 qq 自建索引 %LOCALAPPDATA%\\qq\\index.gz（掃全部固定磁碟）
+
+用法：qq-updatedb [--force] [--quiet]
+  --force  Linux 有 plocate 時也照樣建 qq 自建索引
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import qq_lib as q  # noqa: E402
+
+
+def log(msg: str, quiet: bool) -> None:
+    if not quiet:
+        print(f"qq-updatedb: {msg}", flush=True)
+
+
+def lock_path() -> str:
+    return os.path.join(q.cache_dir(), "updatedb.lock")
+
+
+def acquire_lock() -> bool:
+    os.makedirs(q.cache_dir(), exist_ok=True)
+    path = lock_path()
+    try:
+        os.mkdir(path)
+        return True
+    except FileExistsError:
+        # 超過 3 小時視為殘留
+        try:
+            if time.time() - os.stat(path).st_mtime > 3 * 3600:
+                os.rmdir(path)
+                os.mkdir(path)
+                return True
+        except OSError:
+            pass
+        return False
+
+
+def build_mac(quiet: bool) -> int:
+    db = q.LOCATE_DB
+    tmp = db + f".tmp{os.getpid()}"
+    env = dict(os.environ, FCODES=tmp)
+    # locate.updatedb 預設排除 /private/tmp、/private/var/folders、Time Machine 與 firmlink 重複路徑
+    proc = subprocess.run(["/usr/libexec/locate.updatedb"], env=env, cwd="/")
+    if proc.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        print("qq-updatedb: locate.updatedb 失敗", file=sys.stderr)
+        return 1
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, db)
+    out = subprocess.run(["/usr/bin/locate", "-d", db, "-S"], capture_output=True, text=True).stdout
+    count = next((ln.split()[1] for ln in out.splitlines() if ln.startswith("Filenames:")), "?")
+    log(f"共 {count.rstrip(',')} 筆 → {db}", quiet)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print(__doc__)
+        return 0
+    force = "--force" in argv
+    quiet = "--quiet" in argv
+
+    if not q.IS_MAC and not q.IS_WIN and q.find_bin("plocate") and not force:
+        log("這台有 plocate，由系統負責更新索引，不需要 qq 自建（要強制建請加 --force）", quiet)
+        return 0
+
+    if not acquire_lock():
+        print(f"qq-updatedb: 已有建庫在執行（{lock_path()}）", file=sys.stderr)
+        return 1
+    start = time.time()
+    log(f"開始建庫 {time.strftime('%F %T')}", quiet)
+    try:
+        if q.IS_MAC:
+            rc = build_mac(quiet)
+        else:
+            n, path = q.build_own_index()
+            log(f"共 {n} 筆 → {path}", quiet)
+            rc = 0
+    finally:
+        try:
+            os.rmdir(lock_path())
+        except OSError:
+            pass
+    log(f"完成 {time.strftime('%F %T')}，耗時 {int(time.time() - start)} 秒", quiet)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
