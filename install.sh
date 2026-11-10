@@ -187,7 +187,7 @@ if [ "$OS" = mac ]; then
 </plist>
 EOF
     launchctl bootstrap "gui/$(id -u)" "$MAC_PLIST" 2>/dev/null || warn "LaunchAgent 載入失敗（之後可手動 qq-updatedb）"
-    say "排程：LaunchAgent $MAC_LABEL，每天 12:30 重建 locate 索引"
+    say "排程：LaunchAgent ${MAC_LABEL}，每天 12:30 重建 locate 索引"
 elif command -v plocate >/dev/null 2>&1; then
     NEED_BUILD=0
     say "索引：使用系統 plocate（由系統自動更新）"
