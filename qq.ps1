@@ -67,6 +67,10 @@ function global:qq {
             $global:LASTEXITCODE = $r.Code
             if ($r.Code -eq 0 -and $r.Target) { return $r.Target }
         }
+        { $_ -in 'cp', 'scp' } {
+            $env:PYTHONUTF8 = '1'
+            & (Get-QQPython) (Join-Path $env:QQ_HOME "bin\qq-$sub") @rest
+        }
         { $_ -in '', 'help', '-h', '--help' } {
             @'
 qq 指令集
@@ -78,6 +82,8 @@ qq 指令集
   find    依名稱搜尋資料夾／檔案，互動選擇後切換目錄
   pick    依名稱搜尋，選完回傳完整路徑（人留在原地）
   grep    依檔案內容搜尋，互動選擇後切換到該檔所在資料夾
+  cp      複製到資料夾；目的地可以只打資料夾名稱，搜尋後選定再複製
+  scp     傳到別台機器，目的地只寫機器，自動放進對方的 Downloads（沒有就放家目錄）
   help    顯示本說明
 
 索引：
@@ -90,6 +96,8 @@ qq 指令集
   notepad (qq pick -f hosts)
   Copy-Item (qq pick -f notes.md) .
   qq grep TODO
+  qq cp .\test.txt document          選一個 document / Documents 資料夾後複製過去
+  qq scp .\test.txt manager@mcp:     傳到 mcp 的 ~/Downloads
 '@
         }
         default {
@@ -108,8 +116,11 @@ Register-ArgumentCompleter -CommandName qq -Native -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
     $words = @($commandAst.CommandElements | ForEach-Object { $_.ToString() })
     $cands = if ($words.Count -le 2 -and -not ($words.Count -eq 2 -and $wordToComplete -eq '')) {
-        'find', 'pick', 'grep', 'help'
-    } elseif ($words[1] -eq 'grep') { '--regex', '--help' } else { '-d', '-f', '--fresh', '--help' }
+        'find', 'pick', 'grep', 'cp', 'scp', 'help'
+    } elseif ($words[1] -eq 'grep') { '--regex', '--help' }
+    elseif ($words[1] -eq 'cp') { '-f', '--force', '--fresh', '--help' }
+    elseif ($words[1] -eq 'scp') { '-P', '-i', '-J', '-o', '-q', '--help' }
+    else { '-d', '-f', '--fresh', '--help' }
     $cands | Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }

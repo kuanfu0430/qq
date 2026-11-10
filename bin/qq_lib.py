@@ -164,14 +164,14 @@ def bre_escape(text: str) -> str:
     return "".join(("\\" + c) if c in BRE_SPECIAL else c for c in text)
 
 
-def search_index(query: str) -> list[str]:
+def search_index(query: str, prefix: bool = False) -> list[str]:
     if IS_MAC:
-        return search_macos_index(query)
+        return search_macos_index(query, prefix)
     if IS_WIN:
-        return search_own_index(query)
+        return search_own_index(query, prefix)
     if os.environ.get("QQ_INDEX") != "own" and find_bin("plocate"):
-        return search_plocate(query)
-    return search_own_index(query)
+        return search_plocate(query, prefix)
+    return search_own_index(query, prefix)
 
 
 # ---- qq 自建索引（Windows、沒有 plocate 的 Linux） ----------------------
@@ -180,7 +180,7 @@ def search_index(query: str) -> list[str]:
 INDEX_HEADER = "#qq-index v1"
 
 
-def search_own_index(query: str) -> list[str]:
+def search_own_index(query: str, prefix: bool = False) -> list[str]:
     """分塊解壓，直接在位元組上用正規表示式找「分隔符號＋名稱＋換行」，只解碼命中的那幾行。
     （ASCII 字母不分大小寫；中日韓文字本來就沒有大小寫。）"""
     import re
@@ -190,7 +190,8 @@ def search_own_index(query: str) -> list[str]:
         )
     q = query.encode("utf-8", FS_ERRORS)
     seps = rb"[\\/]" if IS_WIN else rb"/"
-    rx = re.compile(seps + re.escape(q) + rb"(?=\n)", re.IGNORECASE)
+    tail = (rb"[^\\/\n]*" if IS_WIN else rb"[^/\n]*") if prefix else b""
+    rx = re.compile(seps + re.escape(q) + tail + rb"(?=\n)", re.IGNORECASE)
     out: list[str] = []
     rest = b""
     first = True
@@ -314,7 +315,7 @@ def build_own_index(roots: list[str] | None = None) -> tuple[int, str]:
 
 
 # ---- macOS ---------------------------------------------------------------
-def search_macos_index(query: str) -> list[str]:
+def search_macos_index(query: str, prefix: bool = False) -> list[str]:
     """macOS：Spotlight（mdfind）+ BSD locate 自建庫，兩邊合併。
 
     * Spotlight 系統即時維護，涵蓋 Desktop/Documents/Downloads/iCloud/Dropbox，
@@ -326,7 +327,7 @@ def search_macos_index(query: str) -> list[str]:
     errors: list[str] = []
     for fn in (search_spotlight, search_locate):
         try:
-            results.extend(fn(query))
+            results.extend(fn(query, prefix))
         except QQError as exc:
             errors.append(str(exc))
     if not results and len(errors) == 2:
@@ -334,12 +335,13 @@ def search_macos_index(query: str) -> list[str]:
     return results
 
 
-def search_spotlight(query: str) -> list[str]:
+def search_spotlight(query: str, prefix: bool = False) -> list[str]:
     mdfind = "/usr/bin/mdfind"
     if not os.path.exists(mdfind):
         raise QQError("找不到 mdfind")
     esc = "".join(("\\" + c) if c in '"\\*' else c for c in query)
-    cmd = [mdfind, "-0", f'kMDItemFSName == "{esc}"c']
+    star = "*" if prefix else ""
+    cmd = [mdfind, "-0", f'kMDItemFSName == "{esc}{star}"c']
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=30)
     except subprocess.TimeoutExpired:
@@ -351,11 +353,11 @@ def search_spotlight(query: str) -> list[str]:
     return [p for p in raw.split("\0") if p][:MAX_RESULTS]
 
 
-def search_locate(query: str) -> list[str]:
+def search_locate(query: str, prefix: bool = False) -> list[str]:
     if not os.path.isfile(LOCATE_DB):
         raise QQError(f"找不到 locate 資料庫 {LOCATE_DB}（執行 qq-updatedb 可建立）")
     glob = "".join(("\\" + c) if c in "*?[]\\" else c for c in query)
-    cmd = ["/usr/bin/locate", "-i", "-0", "-l", str(MAX_RESULTS), "-d", LOCATE_DB, "*/" + glob]
+    cmd = ["/usr/bin/locate", "-i", "-0", "-l", str(MAX_RESULTS), "-d", LOCATE_DB, "*/" + glob + ("*" if prefix else "")]
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
         err = proc.stderr.decode("utf-8", "replace").strip()
@@ -365,8 +367,8 @@ def search_locate(query: str) -> list[str]:
 
 
 # ---- Linux plocate -------------------------------------------------------
-def search_plocate(query: str) -> list[str]:
-    pattern = "^" + bre_escape(query) + "$"
+def search_plocate(query: str, prefix: bool = False) -> list[str]:
+    pattern = "^" + bre_escape(query) + ("" if prefix else "$")
     cmd = ["plocate", "-b", "-i", "-r", "-0", "-l", str(MAX_RESULTS), "--", pattern]
     proc = subprocess.run(cmd, capture_output=True)
     err = proc.stderr.decode("utf-8", "replace").strip()
@@ -385,30 +387,39 @@ def rust_escape(text: str) -> str:
     return "".join(("\\" + c) if c in RUST_SPECIAL else c for c in text)
 
 
-def search_fresh(query: str) -> list[str]:
+def fresh_roots() -> list[str]:
+    """--fresh 掃描的起點。QQ_FRESH_ROOTS（用 os.pathsep 分隔）可限定範圍，例如避開網路磁碟。"""
+    env = os.environ.get("QQ_FRESH_ROOTS", "")
+    roots = [os.path.expanduser(r) for r in env.split(os.pathsep) if r.strip()]
+    return [r for r in roots if os.path.isdir(r)] or default_index_roots()
+
+
+def search_fresh(query: str, prefix: bool = False) -> list[str]:
     fd = find_bin("fd", "fdfind")
     if fd:
-        return _search_with_fd(fd, query)
+        return _search_with_fd(fd, query, prefix)
     if IS_WIN:
-        return _search_with_walk(query)
-    return _search_with_find(query)
+        return _search_with_walk(query, prefix)
+    return _search_with_find(query, prefix)
 
 
-def _search_with_walk(query: str) -> list[str]:
+def _search_with_walk(query: str, prefix: bool = False) -> list[str]:
     want = query.casefold()
     out: list[str] = []
-    for path in walk_paths(default_index_roots()):
-        if os.path.basename(path).casefold() == want:
+    for path in walk_paths(fresh_roots()):
+        name = os.path.basename(path).casefold()
+        if name == want or (prefix and name.startswith(want)):
             out.append(path)
             if len(out) >= MAX_RESULTS:
                 break
     return out
 
 
-def _search_with_fd(fd: str, query: str) -> list[str]:
+def _search_with_fd(fd: str, query: str, prefix: bool = False) -> list[str]:
     cmd = [
         fd,
         "--absolute-path",
+        "--ignore-case",
         "--hidden",
         "--no-ignore",
         "--color", "never",
@@ -416,8 +427,8 @@ def _search_with_fd(fd: str, query: str) -> list[str]:
     ]
     for d in EXCLUDE_DIRS:
         cmd += ["--exclude", d]
-    cmd += ["--", "^" + rust_escape(query) + "$"]
-    cmd += default_index_roots()
+    cmd += ["--", "^" + rust_escape(query) + ("" if prefix else "$")]
+    cmd += fresh_roots()
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode not in (0, 1):
         err = proc.stderr.decode("utf-8", "replace").strip()
@@ -426,17 +437,30 @@ def _search_with_fd(fd: str, query: str) -> list[str]:
     return [p for p in raw.split("\0") if p][:MAX_RESULTS]
 
 
-def _search_with_find(query: str) -> list[str]:
+def _search_with_find(query: str, prefix: bool = False) -> list[str]:
     glob = "".join(("\\" + c) if c in "*?[\\" else c for c in query)
     expr: list[str] = []
     for i, d in enumerate(EXCLUDE_DIRS):
         if i:
             expr.append("-o")
         expr += ["-path", d]
-    cmd = ["find", "/", "("] + expr + [")", "-prune", "-o", "-iname", glob, "-print0"]
+    cmd = ["find"] + fresh_roots() + ["("] + expr + [")", "-prune", "-o", "-iname", glob + ("*" if prefix else ""), "-print0"]
     proc = subprocess.run(cmd, capture_output=True)
     raw = proc.stdout.decode("utf-8", "surrogateescape")
     return [p for p in raw.split("\0") if p][:MAX_RESULTS]
+
+
+def search_names(query: str, fresh: bool = False, prefix: bool = False) -> list[str]:
+    """名稱搜尋共用入口。prefix=True 時找「名稱以 query 開頭」的項目。
+    結果一律再用最後一段名稱過濾，確保只留下名稱本身相符的路徑。"""
+    raw = search_fresh(query, prefix) if fresh else search_index(query, prefix)
+    want = query.casefold()
+    out: list[str] = []
+    for p in raw:
+        name = os.path.basename(norm_path(p)).casefold()
+        if name == want or (prefix and name.startswith(want)):
+            out.append(p)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -964,6 +988,27 @@ def has_tty() -> bool:
         return False
     os.close(fd)
     return True
+
+
+def ask_yes(question: str) -> bool:
+    """在終端機上問「是／否」。沒有互動終端機時一律回答否（不覆蓋），請改用 -f。"""
+    if not has_tty():
+        print(f"{question} → 無互動終端機，視為「否」（要覆蓋請加 -f）", file=sys.stderr)
+        return False
+    prompt = f"{question} [y/N] "
+    if IS_WIN:
+        try:
+            ans = input(prompt)
+        except EOFError:
+            return False
+    else:
+        # /dev/tty 不能用 "r+" 文字模式（會報 not seekable），讀、寫分開開
+        with open("/dev/tty", "w", encoding="utf-8", errors="replace") as tout, \
+                open("/dev/tty", "r", encoding="utf-8", errors="replace") as tin:
+            tout.write(prompt)
+            tout.flush()
+            ans = tin.readline()
+    return ans.strip().lower() in ("y", "yes", "是")
 
 
 def choose_path(

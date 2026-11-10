@@ -7,9 +7,36 @@
 | `qq find [-d\|-f] [--fresh] <名稱>` | 依名稱找，選完 cd 過去（選到檔案就 cd 到它所在的資料夾） |
 | `qq pick [-d\|-f] [--fresh] <名稱>` | 依名稱找，選完只輸出路徑，不 cd |
 | `qq grep [--regex] <文字> [目錄]` | 依內容找，選完 cd 到該檔所在的資料夾 |
+| `qq cp [-f] [--fresh] <來源...> <目的地>` | 複製；目的地只打資料夾名稱時先搜尋，選定再複製 |
+| `qq scp [-P 埠] [-i 金鑰] <來源...> <[使用者@]機器[:]>` | 傳到別台機器，自動放進對方的 `~/Downloads`（沒有就放家目錄） |
 | `qq-updatedb` | 立即重建名稱索引（平常每天 12:30 自動更新） |
 
-名稱要完全相符，不分大小寫。選單：↑↓/jk 移動、Enter 選、q/Esc 取消。
+find／pick 的名稱要完全相符，不分大小寫。選單：↑↓/jk 移動、Enter 選、q/Esc 取消。
+
+### qq cp
+
+```sh
+qq cp ~/mnt/test.txt document     # 列出 document、Documents… 等資料夾，選一個後複製過去
+qq cp a.txt b.txt projects        # 一次複製多個
+qq cp -f ~/mnt/photos Downloads   # 資料夾整個複製；已存在就直接覆蓋
+qq cp report.pdf ~/Desktop        # 目的地寫成路徑時不搜尋，跟一般 cp 一樣
+```
+
+- 目的地只有名稱時：同名資料夾排前面，接著是名稱開頭相符的（`document` 也會找到 `Documents`）；家目錄底下的優先；沒有寫入權限的資料夾不列出。
+- 目的地已有同名檔案時會先問要不要覆蓋；加 `-f` 不問。
+- 沒有互動終端機時，只有找到唯一一個資料夾才會複製。
+- `--fresh` 即時掃描；設 `QQ_FRESH_ROOTS=~/a:~/b` 可限定掃描範圍（避開很慢的網路磁碟）。
+
+### qq scp
+
+```sh
+qq scp ~/mnt/test.txt manager@mcp:    # 放到 mcp 的 ~/Downloads
+qq scp ~/mnt/photos manager@civil     # 冒號可省略；資料夾自動整個傳
+qq scp notes.md manager@mcp:/tmp      # 冒號後面有路徑就照寫的放
+```
+
+- 先用 sftp 看對方有沒有 `Downloads`，再用 scp 傳；兩步共用同一條連線，需要密碼只問一次（Windows 用戶端除外）。對方是 Windows 也可以。
+- 機器可以是 MagicDNS 短名、IP，或 `~/.ssh/config` 的 Host。
 
 ## 安裝
 

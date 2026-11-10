@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""qq scp - 用 scp 傳到別台機器，目的地只要給機器，自動放進對方的 Downloads（沒有就放家目錄）。"""
+
+from __future__ import annotations
+
+import locale
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from qq_lib import IS_WIN, QQError
+
+HELP = """\
+qq scp - 傳檔到別台機器，目的地只要寫機器，不用寫資料夾
+
+用法：
+  qq scp [選項] <來源...> <[使用者@]機器[:]>
+
+放到哪裡：
+  * 對方家目錄有 Downloads 資料夾 → 放進 ~/Downloads
+  * 沒有 Downloads → 放在對方的家目錄
+  * 冒號後面有寫路徑（例如 manager@mcp:/tmp）→ 照寫的路徑放，跟一般 scp 一樣
+
+選項：
+  -P <埠>       SSH 埠號
+  -i <金鑰>     指定私鑰
+  -J <跳板>     經由跳板機連線
+  -o <選項>     其他 ssh 設定（可重複），例如 -o ConnectTimeout=5
+  -q            不顯示進度
+  -h, --help    顯示本說明
+
+範例：
+  qq scp ~/mnt/test.txt manager@mcp:
+  qq scp a.txt b.txt manager@civil          冒號可省略
+  qq scp ~/mnt/photos manager@mcp:          資料夾自動整個傳（等同 scp -r）
+  qq scp -P 2222 notes.md neil@10.0.0.5:
+
+說明：
+  * 機器名稱可以用 MagicDNS 短名（mcp、civil）、IP，或 ~/.ssh/config 裡的 Host 名稱。
+  * 先用 sftp 確認對方有沒有 Downloads，再用 scp 傳；兩步共用同一條連線（Windows 除外），
+    需要密碼時只會問一次。對方是 Windows 也可以用。
+  * 目的地有同名檔案時會被覆蓋（跟 scp 一樣）。
+"""
+
+PWD_RE = re.compile(r"^Remote working directory: (.*)$", re.M)
+
+
+class ScpOptions:
+    def __init__(self) -> None:
+        self.ssh_opts: list[str] = []
+        self.quiet = False
+        self.help = False
+        self.sources: list[str] = []
+        self.target = ""
+
+
+def parse_args(argv: list[str]) -> ScpOptions:
+    o = ScpOptions()
+    pos: list[str] = []
+    it = iter(argv)
+    only_pos = False
+    for a in it:
+        if only_pos:
+            pos.append(a)
+            continue
+        if a == "--":
+            only_pos = True
+        elif a in ("-h", "--help"):
+            o.help = True
+        elif a == "-q":
+            o.quiet = True
+        elif a in ("-P", "-i", "-J", "-o", "-F"):
+            try:
+                v = next(it)
+            except StopIteration:
+                raise QQError(f"選項 {a} 後面要接值")
+            o.ssh_opts += [a, v]
+        elif a in ("-r", "-p", "-C", "-4", "-6"):
+            if a != "-r":  # -r 不需要，資料夾會自動判斷
+                o.ssh_opts.append(a)
+        elif a.startswith("-") and a != "-":
+            raise QQError(f"未知的選項「{a}」（詳見 qq scp --help）")
+        else:
+            pos.append(a)
+    if o.help:
+        return o
+    if len(pos) < 2:
+        raise QQError("用法：qq scp <來源...> <[使用者@]機器:>，例如：qq scp ~/mnt/test.txt manager@mcp:")
+    o.sources, o.target = pos[:-1], pos[-1]
+    return o
+
+
+def split_target(t: str) -> tuple[str, str | None]:
+    """'manager@mcp:' → ('manager@mcp', None)；'mcp:/tmp' → ('mcp', '/tmp')；'mcp' → ('mcp', None)"""
+    if t.startswith("[") and "]" in t:  # [IPv6]:path
+        end = t.index("]")
+        host, rest = t[: end + 1], t[end + 1:]
+        path = rest[1:] if rest.startswith(":") else None
+    elif ":" in t:
+        host, path = t.split(":", 1)
+    else:
+        host, path = t, None
+    if not host or host.endswith("@"):
+        raise QQError(f"目標機器格式不對：「{t}」（例如 manager@mcp:）")
+    return host, (path or None)
+
+
+def control_opts() -> list[str]:
+    """兩步共用一條連線，需要密碼時只問一次。Windows 的 OpenSSH 不支援，略過。"""
+    if IS_WIN:
+        return []
+    d = os.path.expanduser("~/.ssh")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    except OSError:
+        return []
+    # 路徑要短（macOS 的 socket 路徑上限 104 字元）
+    return ["-o", "ControlMaster=auto", "-o", f"ControlPath={d}/qqcm-%C", "-o", "ControlPersist=20"]
+
+
+def remote_dest_dir(host: str, base: list[str]) -> str:
+    """用 sftp 進對方家目錄，試著 cd Downloads，讀回最後所在位置（Windows 也適用）。"""
+    sftp = shutil.which("sftp")
+    if not sftp:
+        raise QQError("找不到 sftp 指令（請安裝 OpenSSH 用戶端）")
+    # 不加 -q：-q 會連 ssh 的錯誤原因（例如 Host key verification failed）一起吃掉
+    cmd = [sftp] + base + ["--", host]
+    try:
+        proc = subprocess.run(cmd, input="-cd Downloads\npwd\n", capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=120)
+    except subprocess.TimeoutExpired:
+        raise QQError(f"連線 {host} 逾時")
+    m = PWD_RE.findall(proc.stdout)
+    if not m:
+        lines = [e.strip() for e in (proc.stderr + "\n" + proc.stdout).splitlines()
+                 if e.strip() and not e.startswith("sftp>")]
+        # 挑最有意義的那行（「Connection closed」只是結果，不是原因）
+        why = next((e for e in lines if e not in ("Connection closed", "Connection closed.")),
+                   lines[-1] if lines else f"sftp 結束碼 {proc.returncode}")
+        hint = ""
+        if "Host key verification failed" in why:
+            hint = f"（第一次連這台：先執行 ssh {host} 確認主機金鑰）"
+        raise QQError(f"連不上 {host}：{why}{hint}")
+    return m[-1].strip()
+
+
+def main(argv: list[str]) -> int:
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
+    try:
+        o = parse_args(argv)
+        if o.help:
+            print(HELP, end="")
+            return 0
+        host, path = split_target(o.target)
+    except QQError as exc:
+        print(f"qq scp: {exc}", file=sys.stderr)
+        return 2
+
+    srcs = [os.path.expanduser(s) for s in o.sources]
+    missing = [s for s, e in zip(o.sources, srcs) if not os.path.lexists(e)]
+    if missing:
+        print("qq scp: 來源不存在：" + "、".join(missing), file=sys.stderr)
+        return 1
+    scp = shutil.which("scp")
+    if not scp:
+        print("qq scp: 找不到 scp 指令（請安裝 OpenSSH 用戶端）", file=sys.stderr)
+        return 1
+
+    base = o.ssh_opts + control_opts()  # sftp 與 scp 的選項寫法相同（埠號都是 -P）
+
+    try:
+        if path is None:
+            dest = remote_dest_dir(host, base)
+            where = "Downloads" if re.search(r"[\\/]Downloads/?$", dest, re.I) else "家目錄（對方沒有 Downloads）"
+        else:
+            dest, where = path, "指定路徑"
+    except QQError as exc:
+        print(f"qq scp: {exc}", file=sys.stderr)
+        return 1
+
+    remote = f"{host}:{dest.rstrip('/') + '/' if dest not in ('/', '') else dest}"
+    names = "、".join(os.path.basename(s.rstrip("/")) or s for s in o.sources)
+    print(f"qq scp: {names} → {host}:{dest}（{where}）", file=sys.stderr)
+
+    cmd = [scp]
+    if any(os.path.isdir(s) for s in srcs):
+        cmd.append("-r")
+    if o.quiet:
+        cmd.append("-q")
+    cmd += base + ["--"] + srcs + [remote]
+    rc = subprocess.call(cmd)
+    if rc == 0:
+        print(f"已傳送到 {host}:{dest}", file=sys.stderr)
+    else:
+        print(f"qq scp: 傳送失敗（scp 結束碼 {rc}）", file=sys.stderr)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

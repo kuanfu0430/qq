@@ -34,6 +34,8 @@ qq 指令集
   find    依名稱搜尋資料夾／檔案，互動選擇後切換目錄
   pick    依名稱搜尋，選完把完整路徑印出來（人留在原地）
   grep    依檔案內容搜尋，互動選擇後切換到該檔所在資料夾
+  cp      複製到資料夾；目的地可以只打資料夾名稱，搜尋後選定再複製
+  scp     傳到別台機器，目的地只寫機器，自動放進對方的 Downloads（沒有就放家目錄）
   help    顯示本說明
 
 索引：
@@ -47,8 +49,10 @@ qq 指令集
   vim "$(qq pick -f hosts)"
   cp "$(qq pick -f notes.md)" ./
   qq grep TODO            找內容含 TODO 的檔，選完走進它所在資料夾
+  qq cp ~/mnt/test.txt document     選一個 document / Documents 資料夾後複製過去
+  qq scp ~/mnt/test.txt manager@mcp:  傳到 mcp 的 ~/Downloads
 
-（各子指令的詳細說明：qq find --help、qq pick --help、qq grep --help）
+（各子指令的詳細說明：qq find --help、qq pick --help、qq grep --help、qq cp --help、qq scp --help）
 EOF
 }
 
@@ -117,6 +121,11 @@ qq() {
             [ -z "$target" ] && return 1
             _qq_cd_to_target "$target"
             ;;
+        cp|scp)
+            shift
+            # 人不動，直接執行（help 也由程式自己印）
+            _qq_run_bin "qq-$sub" "$@"
+            ;;
         ""|help|-h|--help)
             qq_help
             ;;
@@ -134,7 +143,7 @@ _qq_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "find pick grep help" -- "$cur"))
+        COMPREPLY=($(compgen -W "find pick grep cp scp help" -- "$cur"))
         return
     fi
 
@@ -149,15 +158,29 @@ _qq_complete() {
                 COMPREPLY=($(compgen -W "--regex --help" -- "$cur"))
             fi
             ;;
+        cp)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "-f --force --fresh --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -f -- "$cur"))
+            fi
+            ;;
+        scp)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "-P -i -J -o -q --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -f -- "$cur"))
+            fi
+            ;;
     esac
 }
-complete -F _qq_complete qq 2>/dev/null || true
+complete -o filenames -F _qq_complete qq 2>/dev/null || true
 fi
 
 if [ -n "${ZSH_VERSION:-}" ]; then
 _qq_zsh_complete() {
     if [ "$CURRENT" -eq 2 ]; then
-        compadd -- find pick grep help
+        compadd -- find pick grep cp scp help
         return
     fi
     case "${words[2]}" in
@@ -171,6 +194,20 @@ _qq_zsh_complete() {
                 compadd -- --regex --help
             else
                 _files -/
+            fi
+            ;;
+        cp)
+            if [[ "${words[CURRENT]}" == -* ]]; then
+                compadd -- -f --force --fresh --help
+            else
+                _files
+            fi
+            ;;
+        scp)
+            if [[ "${words[CURRENT]}" == -* ]]; then
+                compadd -- -P -i -J -o -q --help
+            else
+                _files
             fi
             ;;
     esac
