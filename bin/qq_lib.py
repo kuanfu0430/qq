@@ -654,6 +654,8 @@ def _search_with_grep(pattern: str, root: str, regex: bool) -> list[tuple[str, s
     ]
     if not regex:
         cmd.append("-F")
+    else:
+        cmd.append("-E")  # 跟 rg 一樣用延伸正規表示式（+ ? | () 不用加反斜線）
     cmd += ["--", pattern, root]
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode not in (0, 1):
