@@ -36,6 +36,7 @@ qq 指令集
   grep    依檔案內容搜尋，互動選擇後切換到該檔所在資料夾
   cp      複製到資料夾；目的地可以只打資料夾名稱，搜尋後選定再複製
   scp     傳到別台機器，目的地只寫機器，自動放進對方的 Downloads（沒有就放家目錄）
+  open    開放 mcp 的限時 sudo（qq open 60 = 一小時；--status / --revoke）。需要 mcp-elevate 腳本（目前只有 Minis 有）
   help    顯示本說明
 
 索引：
@@ -126,6 +127,10 @@ qq() {
             # 人不動，直接執行（help 也由程式自己印）
             _qq_run_bin "qq-$sub" "$@"
             ;;
+        open)
+            shift
+            command bash "$QQ_HOME/bin/qq-open" "$@"
+            ;;
         ""|help|-h|--help)
             qq_help
             ;;
@@ -143,7 +148,7 @@ _qq_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "find pick grep cp scp help" -- "$cur"))
+        COMPREPLY=($(compgen -W "find pick grep cp scp open help" -- "$cur"))
         return
     fi
 
@@ -165,6 +170,9 @@ _qq_complete() {
                 COMPREPLY=($(compgen -f -- "$cur"))
             fi
             ;;
+        open)
+            COMPREPLY=($(compgen -W "--status --revoke --help 30 60 120" -- "$cur"))
+            ;;
         scp)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "-P -i -J -o -q --help" -- "$cur"))
@@ -180,7 +188,7 @@ fi
 if [ -n "${ZSH_VERSION:-}" ]; then
 _qq_zsh_complete() {
     if [ "$CURRENT" -eq 2 ]; then
-        compadd -- find pick grep cp scp help
+        compadd -- find pick grep cp scp open help
         return
     fi
     case "${words[2]}" in

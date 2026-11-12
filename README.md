@@ -9,6 +9,7 @@
 | `qq grep [--regex] <文字> [目錄]` | 依內容找，選完 cd 到該檔所在的資料夾 |
 | `qq cp [-f] [--fresh] <來源...> <目的地>` | 複製；目的地只打資料夾名稱時先搜尋，選定再複製 |
 | `qq scp [-P 埠] [-i 金鑰] <來源...> <[使用者@]機器[:]>` | 傳到別台機器，自動放進對方的 `~/Downloads`（沒有就放家目錄） |
+| `qq open <分鐘>`／`--status`／`--revoke` | 開放 mcp 的限時 sudo（例如 `qq open 60` 就是一小時，到期自動撤銷）；目前只在 Minis 上能用 |
 | `qq-updatedb` | 立即重建名稱索引（平常每天 12:30 自動更新） |
 
 find／pick 的名稱要完全相符，不分大小寫。選單：↑↓/jk 移動、Enter 選、q/Esc 取消。
@@ -82,3 +83,15 @@ irm https://raw.githubusercontent.com/kuanfu0430/qq/main/install.ps1 | iex
 
 - Linux／macOS：`~/qq/`，在 `~/.zshrc`／`~/.bashrc` 加入 `# >>> qq >>>` 區塊，並建立 `~/.local/bin/qq`（還沒載入函式時的備用入口）
 - Windows：`%LOCALAPPDATA%\qq\app\`，在 PowerShell 5.1／7 的 `$PROFILE` 加入 `# >>> qq >>>` 區塊
+
+### qq open
+
+```sh
+qq open 60         # 開放 mcp 完整 sudo 一小時（1～240 分鐘），到期自動撤銷
+qq open --status   # 是否開放中、何時到期
+qq open --revoke   # 提早撤銷
+```
+
+- 轉呼叫 `mcp-elevate.sh`（預設 `/var/minis/shared/mcp-elevate/mcp-elevate.sh`，可用 `QQ_MCP_ELEVATE` 指定）。
+- 密碼取自環境變數 `MCP_SUDO_PASSWORD`，只經 stdin 交給 mcp 上的 `sudo -S`，不出現在指令列或 log。
+- mcp 端執行的是 root 擁有的 `/usr/local/sbin/agent-elevate`；到期由 `agent-elevate-sweep.timer` 撤銷，重開機也會撤銷。

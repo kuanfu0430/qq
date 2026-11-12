@@ -1,0 +1,16 @@
+#!/bin/bash
+# qq open — 開放 mcp 的限時 sudo（轉呼叫 mcp-elevate.sh）
+#   qq open 60        開放一小時（1～240 分鐘），到期自動撤銷
+#   qq open --status  查看是否開放、何時到期
+#   qq open --revoke  提早撤銷
+# 密碼取自環境變數 MCP_SUDO_PASSWORD（Minis：Settings → Environments），只經 stdin 交給遠端 sudo -S。
+# mcp-elevate.sh 位置：$QQ_MCP_ELEVATE → /var/minis/shared/mcp-elevate/mcp-elevate.sh（Minis）
+set -u
+S=${QQ_MCP_ELEVATE:-/var/minis/shared/mcp-elevate/mcp-elevate.sh}
+if [ ! -f "$S" ]; then
+    printf 'qq open：找不到 %s\n' "$S" >&2
+    printf '這個子指令目前只在 Minis（iPhone）上能用；或設 QQ_MCP_ELEVATE 指到 mcp-elevate.sh。\n' >&2
+    printf '在 mcp 本機可以直接執行：sudo agent-elevate <分鐘>\n' >&2
+    exit 1
+fi
+exec bash "$S" "$@"

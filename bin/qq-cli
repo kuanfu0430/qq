@@ -43,6 +43,7 @@ qq 指令集
   grep    依檔案內容搜尋，互動選擇後切換到該檔所在資料夾
   cp      複製到資料夾；目的地可以只打資料夾名稱，搜尋後選定再複製
   scp     傳到別台機器，目的地只寫機器，自動放進對方的 Downloads（沒有就放家目錄）
+  open    開放 mcp 的限時 sudo（qq open 60 = 一小時；--status / --revoke）
   help    顯示本說明
 
 這是 PATH 上的獨立指令，無法改變呼叫端目錄。
@@ -74,6 +75,10 @@ case "$sub" in
     pick|cp|scp)
         shift
         run_bin "qq-$sub" "$@"
+        ;;
+    open)
+        shift
+        exec bash "$BIN/qq-open" "$@"
         ;;
     ""|help|-h|--help)
         qq_help
