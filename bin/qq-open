@@ -1,6 +1,6 @@
 #!/bin/bash
 # qq open — 開放 mcp 的限時 sudo（轉呼叫 mcp-elevate.sh）
-#   qq open 60        開放一小時（1～240 分鐘），到期自動撤銷
+#   qq open 60        開放一小時（1～720 分鐘），到期自動撤銷
 #   qq open --status  查看是否開放、何時到期
 #   qq open --revoke  提早撤銷
 # 密碼取自環境變數 MCP_SUDO_PASSWORD（Minis：Settings → Environments），只經 stdin 交給遠端 sudo -S。

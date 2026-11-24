@@ -87,7 +87,7 @@ irm https://raw.githubusercontent.com/kuanfu0430/qq/main/install.ps1 | iex
 ### qq open
 
 ```sh
-qq open 60         # 開放 mcp 完整 sudo 一小時（1～240 分鐘），到期自動撤銷
+qq open 60         # 開放 mcp 完整 sudo 一小時（1～720 分鐘），到期自動撤銷
 qq open --status   # 是否開放中、何時到期
 qq open --revoke   # 提早撤銷
 ```
